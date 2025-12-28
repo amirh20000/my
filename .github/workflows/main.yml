@@ -2,25 +2,59 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Setup Node
-      uses: actions/setup-node@v4
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
       with:
         node-version: '18'
-        cache: 'npm'
-
-    - name: Setup EAS
-      run: npm install -g eas-cli
-
+    
+    - name: Create Android project if missing
+      run: |
+        if [ ! -d "android" ]; then
+          echo "🚀 Creating Android project..."
+          # روش مطمئن: دانلود مستقیم template
+          wget -q https://github.com/facebook/react-native/archive/refs/tags/v0.72.6.tar.gz || curl -L https://github.com/facebook/react-native/archive/refs/tags/v0.72.6.tar.gz -o v0.72.6.tar.gz
+          tar -xzf v0.72.6.tar.gz
+          cp -r react-native-0.72.6/template/android .
+          rm -rf react-native-0.72.6 v0.72.6.tar.gz
+          
+          # تنظیم package name
+          sed -i 's/com\.androidsample/com\.invoiceapp/g' android/app/build.gradle
+          sed -i 's/AndroidSample/InvoiceApp/g' android/app/build.gradle
+          echo "✅ Android project created successfully"
+        else
+          echo "📁 Android folder already exists"
+        fi
+    
+    - name: Install dependencies
+      run: |
+        npm install --legacy-peer-deps
+    
     - name: Build APK
-      run: eas build --platform android --profile preview --non-interactive
-      env:
-        EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      run: |
+        cd android
+        chmod +x gradlew
+        ./gradlew assembleRelease --no-daemon
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: invoice-app
+        path: android/app/build/outputs/apk/release/app-release.apk
+        retention-days: 7
