@@ -23,8 +23,10 @@ jobs:
       with:
         node-version: '18'
 
-    - name: Install Expo CLI
-      run: npm install -g eas-cli
+    - name: Install Dependencies
+      run: |
+        echo "Installing dependencies..."
+        npm install
 
     - name: Create Minimal Android Project
       run: |
@@ -67,6 +69,8 @@ jobs:
         # فایل settings.gradle
         cat > android/settings.gradle << 'EOF'
         rootProject.name = 'InvoiceApp'
+        apply from: file("../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
+        applyNativeModulesSettingsGradle(settings)
         include ':app'
         EOF
         
@@ -84,35 +88,38 @@ jobs:
             compileSdkVersion rootProject.ext.compileSdkVersion
             
             defaultConfig {
-                applicationId "com.invoiceapp.shop"
+                applicationId "com.invoiceapp"
                 minSdkVersion rootProject.ext.minSdkVersion
                 targetSdkVersion rootProject.ext.targetSdkVersion
                 versionCode 1
                 versionName "1.0"
             }
             
-            signingConfigs {
+            buildTypes {
                 release {
-                    storeFile file('debug.keystore')
-                    storePassword 'android'
-                    keyAlias 'androiddebugkey'
-                    keyPassword 'android'
+                    signingConfig signingConfigs.debug
+                    minifyEnabled false
+                    proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
                 }
             }
             
-            buildTypes {
+            signingConfigs {
                 release {
-                    signingConfig signingConfigs.release
-                    minifyEnabled false
-                    proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+                    storeFile file('debug.keystore')
+                        storePassword 'android'
+                        keyAlias 'androiddebugkey'
+                        keyPassword 'android'
                 }
             }
         }
         
         dependencies {
             implementation("com.facebook.react:react-android")
-            implementation("com.facebook.react:hermes-android")
         }
+        
+        apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
+        applyNativeModulesAppBuildGradle(project)
+        EOF
         
         # فایل AndroidManifest.xml
         cat > android/app/src/main/AndroidManifest.xml << 'EOF'
@@ -121,13 +128,13 @@ jobs:
             
             <application
               android:name=".MainApplication"
-              android:label="Invoice App"
+              android:label="@string/app_name"
               android:icon="@mipmap/ic_launcher"
               android:allowBackup="false"
-              android:theme="@style/AppTheme.NoActionBar">
+              android:theme="@android:style/AppTheme.NoActionBar">
               <activity
                 android:name=".MainActivity"
-                android:label="Invoice App"
+                android:label="@string/app_name"
                 android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
                 android:launchMode="singleTask"
                 android:windowSoftInputMode="adjustResize"
@@ -150,40 +157,26 @@ jobs:
         public class MainActivity extends ReactActivity {
             @Override
             protected String getMainComponentName() {
-                return "main";
+                return "InvoiceApp";
             }
         }
         EOF
 
-    - name: Copy Project Files (Override Structure)
-      run: |
-        echo "Copying source files to android project..."
-        
-        # کپی کردن فایل‌های JS به assets
-        mkdir -p android/app/src/main/assets
-        cp App.js android/app/src/main/assets/index.js
-        cp package.json android/app/src/main/assets/package.json
-        
-        # کپی کردن فایل‌های screens
-        mkdir -p android/app/src/main/assets/screens
-        cp -a screens/*.js android/app/src/main/assets/screens/
-        
-        # ایجاد فایل index.android.js bundle wrapper
-        echo 'import App from "./App.js";' > android/app/src/main/assets/index.android.js
-        echo 'export default App;' >> android/app/src/main/assets/index.android.js
-
-    - name: Generate Gradle Wrapper
+    - name: Generate Gradle Wrapper (Task)
       run: |
         cd android
-        curl -Lo gradlew https://raw.githubusercontent.com/gradle/gradle/v8.5.1/scripts/gradlew
-        curl -Lo gradle/wrapper/gradle-wrapper.jar https://raw.githubusercontent.com/gradle/gradle/v8.5.1/lib/gradle-wrapper.jar
-        curl -Lo gradle/wrapper/gradle-wrapper.properties https://raw.githubusercontent.com/gradle/gradle/v8.5.1/lib/gradle-wrapper/gradle-wrapper.properties
+        gradle wrapper --gradle-version 8.5
+
+    - name: Make Gradlew Executable (Task)
+      run: |
+        cd android
         chmod +x gradlew
 
     - name: Build APK
       run: |
+        echo "Starting build..."
         cd android
-        ./gradlew assembleRelease --stacktrace
+        ./gradlew assembleRelease --no-daemon --stacktrace
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
