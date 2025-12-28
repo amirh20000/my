@@ -2,64 +2,62 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:  # امکان اجرای دستی
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  build-android:
-    name: Build Android Release APK
+  build:
     runs-on: ubuntu-latest
     
     steps:
-    # 1. دریافت کد از ریپو
-    - name: Checkout repository
+    - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
     
-    # 2. تنظیم JDK برای اندروید
-    - name: Setup Java JDK
-      uses: actions/setup-java@v4
+    - name: Setup Java
+      uses: actions/setup-java@v3
       with:
-        distribution: 'temurin'
         java-version: '11'
+        distribution: 'temurin'
     
-    # 3. تنظیم Node.js
-    - name: Setup Node.js
+    - name: Setup Node.js (No Cache)
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-        cache: 'npm'
+        # حذف خط cache
     
-    # 4. ایجاد package-lock.json اگر وجود ندارد
-    - name: Create package-lock if missing
+    - name: Initialize Project
       run: |
-        if [ ! -f "package-lock.json" ] && [ ! -f "yarn.lock" ]; then
-          echo "Creating package-lock.json..."
+        echo "Initializing project..."
+        # اگر package.json نداریم، ایجادش می‌کنیم
+        if [ ! -f "package.json" ]; then
           npm init -y --silent
-          npm install react@18.2.0 react-native@0.72.6 --save --legacy-peer-deps --package-lock-only
         fi
-    
-    # 5. نصب وابستگی‌ها
-    - name: Install dependencies
-      run: |
-        npm install --legacy-peer-deps --no-audit --verbose
-    
-    # 6. ایجاد ساختار پروژه اندروید
-    - name: Create Android project structure
-      run: |
-        echo "🛠️ Creating Android project structure..."
         
-        # پاک کردن پوشه android اگر قبلاً ایجاد شده با خطا
-        rm -rf android
+        # نصب React Native با نسخه مشخص
+        npm install react@18.2.0 react-native@0.72.6 --save --legacy-peer-deps
+    
+    - name: Install Navigation Dependencies
+      run: |
+        npm install @react-navigation/native@^6.1.9 @react-navigation/stack@^6.3.20 --legacy-peer-deps
+    
+    - name: Install Required Packages
+      run: |
+        npm install react-native-screens@^3.22.0 \
+                  react-native-safe-area-context@^4.6.3 \
+                  react-native-gesture-handler@^2.12.0 \
+                  @react-native-async-storage/async-storage@^1.18.2 \
+                  react-native-vector-icons@^9.2.0 \
+                  --legacy-peer-deps
+    
+    - name: Create Android Project Structure
+      run: |
+        echo "🛠️ Creating Android project..."
         
-        # ساختار پوشه‌ها
+        # ساختار اصلی
         mkdir -p android/app/src/main/java/com/invoiceapp
         mkdir -p android/app/src/main/res/values
-        mkdir -p android/app/src/main/assets
-        mkdir -p android/gradle/wrapper
         
-        # ---------- android/build.gradle ----------
+        # فایل build.gradle سطح پروژه
         cat > android/build.gradle << 'EOF'
         buildscript {
             ext {
@@ -68,7 +66,6 @@ jobs:
                 compileSdkVersion = 33
                 targetSdkVersion = 33
                 ndkVersion = "23.1.7779620"
-                kotlinVersion = "1.8.0"
             }
             repositories {
                 google()
@@ -77,7 +74,6 @@ jobs:
             dependencies {
                 classpath("com.android.tools.build:gradle:7.3.1")
                 classpath("com.facebook.react:react-native-gradle-plugin")
-                classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:\$kotlinVersion")
             }
         }
         
@@ -96,16 +92,13 @@ jobs:
         }
         EOF
         
-        # ---------- android/app/build.gradle ----------
+        # فایل app/build.gradle
         cat > android/app/build.gradle << 'EOF'
         apply plugin: "com.android.application"
         apply plugin: "com.facebook.react"
-        apply plugin: "org.jetbrains.kotlin.android"
         
         project.ext.react = [
-            enableHermes: true,
-            bundleInRelease: true,
-            bundleInDebug: true
+            enableHermes: false
         ]
         
         android {
@@ -127,45 +120,29 @@ jobs:
                     keyAlias 'androiddebugkey'
                     keyPassword 'android'
                 }
-                release {
-                    storeFile file('debug.keystore')
-                    storePassword 'android'
-                    keyAlias 'androiddebugkey'
-                    keyPassword 'android'
-                }
             }
             
             buildTypes {
                 debug {
                     signingConfig signingConfigs.debug
-                    debuggable true
                 }
                 release {
-                    signingConfig signingConfigs.release
+                    signingConfig signingConfigs.debug
                     minifyEnabled false
                     proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
-                    debuggable false
                 }
-            }
-            
-            packagingOptions {
-                pickFirst '**/libjsc.so'
-                pickFirst '**/libc++_shared.so'
             }
         }
         
         dependencies {
             implementation("com.facebook.react:react-android")
-            implementation("com.facebook.react:hermes-android")
-            implementation("androidx.core:core-ktx:1.10.1")
-            implementation("androidx.appcompat:appcompat:1.6.1")
         }
         
         apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
         applyNativeModulesAppBuildGradle(project)
         EOF
         
-        # ---------- android/settings.gradle ----------
+        # فایل settings.gradle
         cat > android/settings.gradle << 'EOF'
         rootProject.name = 'InvoiceApp'
         apply from: file("../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
@@ -173,44 +150,33 @@ jobs:
         include ':app'
         EOF
         
-        # ---------- android/gradle.properties ----------
-        cat > android/gradle.properties << 'EOF'
-        android.useAndroidX=true
-        android.enableJetifier=true
-        org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-        org.gradle.parallel=true
-        org.gradle.caching=true
-        org.gradle.daemon=true
+        # MainActivity.java
+        cat > android/app/src/main/java/com/invoiceapp/MainActivity.java << 'EOF'
+        package com.invoiceapp;
+        
+        import com.facebook.react.ReactActivity;
+        
+        public class MainActivity extends ReactActivity {
+            @Override
+            protected String getMainComponentName() {
+                return "InvoiceApp";
+            }
+        }
         EOF
         
-        # ---------- android/gradle/wrapper/gradle-wrapper.properties ----------
-        cat > android/gradle/wrapper/gradle-wrapper.properties << 'EOF'
-        distributionBase=GRADLE_USER_HOME
-        distributionPath=wrapper/dists
-        distributionUrl=https\://services.gradle.org/distributions/gradle-7.5.1-all.zip
-        zipStoreBase=GRADLE_USER_HOME
-        zipStorePath=wrapper/dists
-        EOF
-        
-        # ---------- AndroidManifest.xml ----------
+        # AndroidManifest.xml ساده
         cat > android/app/src/main/AndroidManifest.xml << 'EOF'
         <manifest xmlns:android="http://schemas.android.com/apk/res/android">
             <uses-permission android:name="android.permission.INTERNET" />
-            <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-            <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-                android:maxSdkVersion="28" />
             
             <application
               android:name=".MainApplication"
-              android:label="@string/app_name"
-              android:icon="@mipmap/ic_launcher"
-              android:roundIcon="@mipmap/ic_launcher_round"
+              android:label="Invoice App"
               android:allowBackup="false"
-              android:theme="@style/AppTheme"
-              android:usesCleartextTraffic="true">
+              android:theme="@style/AppTheme">
               <activity
                 android:name=".MainActivity"
-                android:label="@string/app_name"
+                android:label="Invoice App"
                 android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
                 android:launchMode="singleTask"
                 android:windowSoftInputMode="adjustResize"
@@ -224,82 +190,32 @@ jobs:
         </manifest>
         EOF
         
-        # ---------- MainApplication.java ----------
-        cat > android/app/src/main/java/com/invoiceapp/MainApplication.java << 'EOF'
-        package com.invoiceapp;
+        echo "✅ Android structure created"
+    
+    - name: Build APK
+      run: |
+        cd android
         
-        import android.app.Application;
-        import com.facebook.react.PackageList;
-        import com.facebook.react.ReactApplication;
-        import com.facebook.react.ReactNativeHost;
-        import com.facebook.react.ReactPackage;
-        import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint;
-        import com.facebook.react.defaults.DefaultReactNativeHost;
-        import com.facebook.soloader.SoLoader;
-        import java.util.List;
+        # ایجاد gradlew اگر وجود ندارد
+        if [ ! -f "gradlew" ]; then
+          cat > gradlew << 'EOF'
+          #!/bin/sh
+          # Gradle wrapper script
+          echo "Using system gradle"
+          gradle "$@"
+          EOF
+          chmod +x gradlew
+        fi
         
-        public class MainApplication extends Application implements ReactApplication {
-        
-          private final ReactNativeHost mReactNativeHost =
-              new DefaultReactNativeHost(this) {
-                @Override
-                public boolean getUseDeveloperSupport() {
-                  return BuildConfig.DEBUG;
-                }
-        
-                @Override
-                protected List<ReactPackage> getPackages() {
-                  @SuppressWarnings("UnnecessaryLocalVariable")
-                  List<ReactPackage> packages = new PackageList(this).getPackages();
-                  return packages;
-                }
-        
-                @Override
-                protected String getJSMainModuleName() {
-                  return "index";
-                }
-        
-                @Override
-                protected boolean isNewArchEnabled() {
-                  return BuildConfig.IS_NEW_ARCHITECTURE_ENABLED;
-                }
-        
-                @Override
-                protected Boolean isHermesEnabled() {
-                  return BuildConfig.IS_HERMES_ENABLED;
-                }
-              };
-        
-          @Override
-          public ReactNativeHost getReactNativeHost() {
-            return mReactNativeHost;
-          }
-        
-          @Override
-          public void onCreate() {
-            super.onCreate();
-            SoLoader.init(this, /* native exopackage */ false);
-            if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
-              DefaultNewArchitectureEntryPoint.load();
-            }
-          }
-        }
-        EOF
-        
-        # ---------- MainActivity.java ----------
-        cat > android/app/src/main/java/com/invoiceapp/MainActivity.java << 'EOF'
-        package com.invoiceapp;
-        
-        import com.facebook.react.ReactActivity;
-        import com.facebook.react.ReactActivityDelegate;
-        import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint;
-        import com.facebook.react.defaults.DefaultReactActivityDelegate;
-        
-        public class MainActivity extends ReactActivity {
-        
-          @Override
-          protected String getMainComponentName() {
-            return "InvoiceApp";
+        # ساخت APK با gradle مستقیم
+        gradle wrapper --gradle-version 7.5.1
+        ./gradlew assembleRelease --no-daemon
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: invoice-app
+        path: android/app/build/outputs/apk/release/app-release.apk
           }
         
           @Override
