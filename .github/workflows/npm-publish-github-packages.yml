@@ -2,116 +2,409 @@ name: Build Android APK
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches: [ main ]
+  workflow_dispatch:  # امکان اجرای دستی
 
 jobs:
-  build:
+  build-android:
+    name: Build Android Release APK
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
+    # 1. دریافت کد از ریپو
+    - name: Checkout repository
       uses: actions/checkout@v4
-    
-    - name: Setup Java
-      uses: actions/setup-java@v3
       with:
-        java-version: '11'
-        distribution: 'temurin'
+        fetch-depth: 0
     
+    # 2. تنظیم JDK برای اندروید
+    - name: Setup Java JDK
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '11'
+    
+    # 3. تنظیم Node.js
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-        # حذف cache چون package-lock.json نداریم
+        cache: 'npm'
     
-    - name: Create package-lock.json
+    # 4. ایجاد package-lock.json اگر وجود ندارد
+    - name: Create package-lock if missing
       run: |
-        # اگر package-lock.json نیست، ایجادش کن
-        if [ ! -f "package-lock.json" ]; then
+        if [ ! -f "package-lock.json" ] && [ ! -f "yarn.lock" ]; then
           echo "Creating package-lock.json..."
-          npm init -y
-          # نصب dependencyهای اصلی
-          npm install react-native@0.72.6 --save --legacy-peer-deps --package-lock-only
+          npm init -y --silent
+          npm install react@18.2.0 react-native@0.72.6 --save --legacy-peer-deps --package-lock-only
         fi
     
-    - name: Install Dependencies
+    # 5. نصب وابستگی‌ها
+    - name: Install dependencies
       run: |
-        npm install --legacy-peer-deps --no-audit
+        npm install --legacy-peer-deps --no-audit --verbose
     
-    - name: Create Android Project
+    # 6. ایجاد ساختار پروژه اندروید
+    - name: Create Android project structure
       run: |
-        if [ ! -d "android" ]; then
-          echo "🚀 Creating Android project..."
-          
-          # ساختار اصلی
-          mkdir -p android/app/src/main/java/com/invoiceapp
-          mkdir -p android/app/src/main/res/values
-          mkdir -p android/gradle/wrapper
-          
-          # strings.xml
-          cat > android/app/src/main/res/values/strings.xml << 'EOF'
-          <resources>
-              <string name="app_name">InvoiceApp</string>
-          </resources>
-          EOF
-          
-          # فایل‌های gradle (همان کد قبلی)
-          cat > android/build.gradle << 'EOF'
-          buildscript {
-              ext {
-                  buildToolsVersion = "33.0.0"
-                  minSdkVersion = 21
-                  compileSdkVersion = 33
-                  targetSdkVersion = 33
-                  ndkVersion = "23.1.7779620"
-                  kotlinVersion = "1.8.0"
-              }
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath("com.android.tools.build:gradle:7.3.1")
-                  classpath("com.facebook.react:react-native-gradle-plugin")
-                  classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
-              }
+        echo "🛠️ Creating Android project structure..."
+        
+        # پاک کردن پوشه android اگر قبلاً ایجاد شده با خطا
+        rm -rf android
+        
+        # ساختار پوشه‌ها
+        mkdir -p android/app/src/main/java/com/invoiceapp
+        mkdir -p android/app/src/main/res/values
+        mkdir -p android/app/src/main/assets
+        mkdir -p android/gradle/wrapper
+        
+        # ---------- android/build.gradle ----------
+        cat > android/build.gradle << 'EOF'
+        buildscript {
+            ext {
+                buildToolsVersion = "33.0.0"
+                minSdkVersion = 21
+                compileSdkVersion = 33
+                targetSdkVersion = 33
+                ndkVersion = "23.1.7779620"
+                kotlinVersion = "1.8.0"
+            }
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath("com.android.tools.build:gradle:7.3.1")
+                classpath("com.facebook.react:react-native-gradle-plugin")
+                classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:\$kotlinVersion")
+            }
+        }
+        
+        allprojects {
+            repositories {
+                maven {
+                    url("\$rootDir/../node_modules/react-native/android")
+                }
+                maven {
+                    url("\$rootDir/../node_modules/jsc-android/dist")
+                }
+                google()
+                mavenCentral()
+                maven { url 'https://www.jitpack.io' }
+            }
+        }
+        EOF
+        
+        # ---------- android/app/build.gradle ----------
+        cat > android/app/build.gradle << 'EOF'
+        apply plugin: "com.android.application"
+        apply plugin: "com.facebook.react"
+        apply plugin: "org.jetbrains.kotlin.android"
+        
+        project.ext.react = [
+            enableHermes: true,
+            bundleInRelease: true,
+            bundleInDebug: true
+        ]
+        
+        android {
+            namespace "com.invoiceapp"
+            compileSdkVersion rootProject.ext.compileSdkVersion
+            
+            defaultConfig {
+                applicationId "com.invoiceapp"
+                minSdkVersion rootProject.ext.minSdkVersion
+                targetSdkVersion rootProject.ext.targetSdkVersion
+                versionCode 1
+                versionName "1.0"
+            }
+            
+            signingConfigs {
+                debug {
+                    storeFile file('debug.keystore')
+                    storePassword 'android'
+                    keyAlias 'androiddebugkey'
+                    keyPassword 'android'
+                }
+                release {
+                    storeFile file('debug.keystore')
+                    storePassword 'android'
+                    keyAlias 'androiddebugkey'
+                    keyPassword 'android'
+                }
+            }
+            
+            buildTypes {
+                debug {
+                    signingConfig signingConfigs.debug
+                    debuggable true
+                }
+                release {
+                    signingConfig signingConfigs.release
+                    minifyEnabled false
+                    proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+                    debuggable false
+                }
+            }
+            
+            packagingOptions {
+                pickFirst '**/libjsc.so'
+                pickFirst '**/libc++_shared.so'
+            }
+        }
+        
+        dependencies {
+            implementation("com.facebook.react:react-android")
+            implementation("com.facebook.react:hermes-android")
+            implementation("androidx.core:core-ktx:1.10.1")
+            implementation("androidx.appcompat:appcompat:1.6.1")
+        }
+        
+        apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
+        applyNativeModulesAppBuildGradle(project)
+        EOF
+        
+        # ---------- android/settings.gradle ----------
+        cat > android/settings.gradle << 'EOF'
+        rootProject.name = 'InvoiceApp'
+        apply from: file("../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
+        applyNativeModulesSettingsGradle(settings)
+        include ':app'
+        EOF
+        
+        # ---------- android/gradle.properties ----------
+        cat > android/gradle.properties << 'EOF'
+        android.useAndroidX=true
+        android.enableJetifier=true
+        org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+        org.gradle.parallel=true
+        org.gradle.caching=true
+        org.gradle.daemon=true
+        EOF
+        
+        # ---------- android/gradle/wrapper/gradle-wrapper.properties ----------
+        cat > android/gradle/wrapper/gradle-wrapper.properties << 'EOF'
+        distributionBase=GRADLE_USER_HOME
+        distributionPath=wrapper/dists
+        distributionUrl=https\://services.gradle.org/distributions/gradle-7.5.1-all.zip
+        zipStoreBase=GRADLE_USER_HOME
+        zipStorePath=wrapper/dists
+        EOF
+        
+        # ---------- AndroidManifest.xml ----------
+        cat > android/app/src/main/AndroidManifest.xml << 'EOF'
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+            <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+                android:maxSdkVersion="28" />
+            
+            <application
+              android:name=".MainApplication"
+              android:label="@string/app_name"
+              android:icon="@mipmap/ic_launcher"
+              android:roundIcon="@mipmap/ic_launcher_round"
+              android:allowBackup="false"
+              android:theme="@style/AppTheme"
+              android:usesCleartextTraffic="true">
+              <activity
+                android:name=".MainActivity"
+                android:label="@string/app_name"
+                android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+                android:launchMode="singleTask"
+                android:windowSoftInputMode="adjustResize"
+                android:exported="true">
+                <intent-filter>
+                    <action android:name="android.intent.action.MAIN" />
+                    <category android:name="android.intent.category.LAUNCHER" />
+                </intent-filter>
+              </activity>
+            </application>
+        </manifest>
+        EOF
+        
+        # ---------- MainApplication.java ----------
+        cat > android/app/src/main/java/com/invoiceapp/MainApplication.java << 'EOF'
+        package com.invoiceapp;
+        
+        import android.app.Application;
+        import com.facebook.react.PackageList;
+        import com.facebook.react.ReactApplication;
+        import com.facebook.react.ReactNativeHost;
+        import com.facebook.react.ReactPackage;
+        import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint;
+        import com.facebook.react.defaults.DefaultReactNativeHost;
+        import com.facebook.soloader.SoLoader;
+        import java.util.List;
+        
+        public class MainApplication extends Application implements ReactApplication {
+        
+          private final ReactNativeHost mReactNativeHost =
+              new DefaultReactNativeHost(this) {
+                @Override
+                public boolean getUseDeveloperSupport() {
+                  return BuildConfig.DEBUG;
+                }
+        
+                @Override
+                protected List<ReactPackage> getPackages() {
+                  @SuppressWarnings("UnnecessaryLocalVariable")
+                  List<ReactPackage> packages = new PackageList(this).getPackages();
+                  return packages;
+                }
+        
+                @Override
+                protected String getJSMainModuleName() {
+                  return "index";
+                }
+        
+                @Override
+                protected boolean isNewArchEnabled() {
+                  return BuildConfig.IS_NEW_ARCHITECTURE_ENABLED;
+                }
+        
+                @Override
+                protected Boolean isHermesEnabled() {
+                  return BuildConfig.IS_HERMES_ENABLED;
+                }
+              };
+        
+          @Override
+          public ReactNativeHost getReactNativeHost() {
+            return mReactNativeHost;
           }
-          
-          allprojects {
-              repositories {
-                  maven {
-                      url("$rootDir/../node_modules/react-native/android")
-                  }
-                  maven {
-                      url("$rootDir/../node_modules/jsc-android/dist")
-                  }
-                  google()
-                  mavenCentral()
-                  maven { url 'https://www.jitpack.io' }
-              }
+        
+          @Override
+          public void onCreate() {
+            super.onCreate();
+            SoLoader.init(this, /* native exopackage */ false);
+            if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
+              DefaultNewArchitectureEntryPoint.load();
+            }
           }
-          EOF
-          
-          # ادامه فایل‌ها (کد کامل از قبل)
-          # ...
-          
-          echo "✅ Android project created"
-        fi
+        }
+        EOF
+        
+        # ---------- MainActivity.java ----------
+        cat > android/app/src/main/java/com/invoiceapp/MainActivity.java << 'EOF'
+        package com.invoiceapp;
+        
+        import com.facebook.react.ReactActivity;
+        import com.facebook.react.ReactActivityDelegate;
+        import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint;
+        import com.facebook.react.defaults.DefaultReactActivityDelegate;
+        
+        public class MainActivity extends ReactActivity {
+        
+          @Override
+          protected String getMainComponentName() {
+            return "InvoiceApp";
+          }
+        
+          @Override
+          protected ReactActivityDelegate createReactActivityDelegate() {
+            return new DefaultReactActivityDelegate(
+                this,
+                getMainComponentName(),
+                DefaultNewArchitectureEntryPoint.getFabricEnabled()
+            );
+          }
+        }
+        EOF
+        
+        # ---------- strings.xml ----------
+        cat > android/app/src/main/res/values/strings.xml << 'EOF'
+        <?xml version="1.0" encoding="utf-8"?>
+        <resources>
+            <string name="app_name">InvoiceApp</string>
+        </resources>
+        EOF
+        
+        # ---------- styles.xml ----------
+        mkdir -p android/app/src/main/res/values-v21
+        cat > android/app/src/main/res/values/styles.xml << 'EOF'
+        <?xml version="1.0" encoding="utf-8"?>
+        <resources>
+            <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+                <item name="android:textColor">#000000</item>
+                <item name="android:editTextBackground">@android:color/transparent</item>
+                <item name="android:windowBackground">@android:color/white</item>
+                <item name="android:statusBarColor">@android:color/transparent</item>
+            </style>
+        </resources>
+        EOF
+        
+        cat > android/app/src/main/res/values-v21/styles.xml << 'EOF'
+        <?xml version="1.0" encoding="utf-8"?>
+        <resources>
+            <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+                <item name="android:windowTranslucentStatus">true</item>
+                <item name="android:textColor">#000000</item>
+                <item name="android:editTextBackground">@android:color/transparent</item>
+                <item name="android:windowBackground">@android:color/white</item>
+            </style>
+        </resources>
+        EOF
+        
+        echo "✅ Android project structure created successfully!"
     
-    - name: Build APK
+    # 7. ایجاد فایل‌های gradle wrapper
+    - name: Setup Gradle Wrapper
       run: |
         cd android
-        chmod +x gradlew
-        # اگر gradlew نیست، دانلود کن
         if [ ! -f "gradlew" ]; then
+          echo "Downloading gradlew..."
           wget -q https://raw.githubusercontent.com/gradle/gradle/master/gradlew
           chmod +x gradlew
         fi
-        ./gradlew assembleRelease --no-daemon
+        
+        # ایجاد debug.keystore
+        echo "Creating debug keystore..."
+        keytool -genkeypair \
+          -v \
+          -keystore debug.keystore \
+          -storepass android \
+          -alias androiddebugkey \
+          -keypass android \
+          -keyalg RSA \
+          -keysize 2048 \
+          -validity 10000 \
+          -dname "CN=Android Debug, OU=Android, O=Google, L=Mountain View, ST=California, C=US" \
+          -noprompt
+        
+        # دانلود gradle wrapper files اگر لازم باشد
+        if [ ! -d "gradle/wrapper" ] || [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+          echo "Downloading gradle wrapper..."
+          mkdir -p gradle/wrapper
+          wget -q -O gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/master/gradle/wrapper/gradle-wrapper.jar
+        fi
     
-    - name: Upload APK
+    # 8. ساخت APK
+    - name: Build Release APK
+      run: |
+        cd android
+        echo "🔨 Building APK..."
+        ./gradlew clean
+        ./gradlew assembleRelease --no-daemon --stacktrace
+    
+    # 9. آپلود APK
+    - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: invoice-app
+        name: invoice-app-apk
         path: android/app/build/outputs/apk/release/app-release.apk
+        retention-days: 30
+    
+    # 10. نمایش اطلاعات
+    - name: Display APK Info
+      run: |
+        if [ -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
+          echo "🎉 APK Successfully Built!"
+          echo "📦 File: android/app/build/outputs/apk/release/app-release.apk"
+          echo "📱 Package: com.invoiceapp"
+          echo "🔒 Signed with debug keystore"
+        else
+          echo "❌ APK not found!"
+          ls -la android/app/build/outputs/apk/
+        fi
