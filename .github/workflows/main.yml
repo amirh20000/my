@@ -11,7 +11,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: Setup Java
       uses: actions/setup-java@v3
@@ -20,31 +20,55 @@ jobs:
         distribution: 'temurin'
     
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '18'
     
-    - name: Create Android project if missing
+    - name: Create Android project
       run: |
         if [ ! -d "android" ]; then
           echo "🚀 Creating Android project..."
-          # روش مطمئن: دانلود مستقیم template
-          wget -q https://github.com/facebook/react-native/archive/refs/tags/v0.72.6.tar.gz || curl -L https://github.com/facebook/react-native/archive/refs/tags/v0.72.6.tar.gz -o v0.72.6.tar.gz
-          tar -xzf v0.72.6.tar.gz
-          cp -r react-native-0.72.6/template/android .
-          rm -rf react-native-0.72.6 v0.72.6.tar.gz
+          
+          # روش ۱: دانلود template از branch قدیمی
+          wget -q https://raw.githubusercontent.com/facebook/react-native/0.72-stable/template/android.tar.gz || \
+          curl -L https://raw.githubusercontent.com/facebook/react-native/0.72-stable/template/android.tar.gz -o android.tar.gz
+          
+          if [ -f "android.tar.gz" ]; then
+            tar -xzf android.tar.gz
+            rm android.tar.gz
+          else
+            # روش ۲: اگر فایل tar نبود، از repo اصلی clone کنیم
+            echo "Using alternative method..."
+            git clone --depth 1 --branch 0.72-stable https://github.com/facebook/react-native.git temp-rn
+            # ساختار جدید React Native
+            mkdir -p android
+            # کپی فایل‌های ضروری
+            cp -r temp-rn/template/android/* android/ 2>/dev/null || true
+            # اگر ساختار قدیمی بود
+            if [ ! -f "android/app/build.gradle" ]; then
+              cp -r temp-rn/template/_android/* android/ 2>/dev/null || true
+            fi
+            rm -rf temp-rn
+          fi
           
           # تنظیم package name
-          sed -i 's/com\.androidsample/com\.invoiceapp/g' android/app/build.gradle
-          sed -i 's/AndroidSample/InvoiceApp/g' android/app/build.gradle
-          echo "✅ Android project created successfully"
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i 's/com\.androidsample/com\.invoiceapp/g' android/app/build.gradle
+            sed -i 's/AndroidSample/InvoiceApp/g' android/app/build.gradle
+            echo "✅ Android project created successfully"
+          else
+            echo "❌ Failed to create Android project structure"
+            exit 1
+          fi
         else
           echo "📁 Android folder already exists"
         fi
     
+    - name: Generate package-lock
+      run: npm install --package-lock-only --legacy-peer-deps
+    
     - name: Install dependencies
-      run: |
-        npm install --legacy-peer-deps
+      run: npm install --legacy-peer-deps
     
     - name: Build APK
       run: |
@@ -57,4 +81,3 @@ jobs:
       with:
         name: invoice-app
         path: android/app/build/outputs/apk/release/app-release.apk
-        retention-days: 7
