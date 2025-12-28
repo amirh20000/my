@@ -27,24 +27,15 @@ jobs:
       run: |
         echo "Installing dependencies..."
         npm install
-        # نصب ابزارهای خط فرمان برای لینوکس (برای شبیه‌سازی محیط ویندوز)
-        sudo apt-get update
-        sudo apt-get install -y dos2unix
-        sudo npm install -g minimist
-
-    - name: Download Gradle Wrapper
-      run: |
-        echo "Downloading Gradle Wrapper..."
-        wget https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.properties -O gradle-wrapper.properties
-        wget https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar -O gradle-wrapper.jar
 
     - name: Create Android Project Structure
       run: |
         echo "Creating structure..."
         
-        # ساخت پوشه اصلی
+        # ساخت پوشه‌ها
         mkdir -p android/app/src/main/java/com/invoiceapp
         mkdir -p android/app/src/main/res/values
+        mkdir -p android/gradle/wrapper
         
         # فایل build.gradle (سطح پروژه)
         cat > android/build.gradle << 'EOF'
@@ -167,10 +158,48 @@ jobs:
         }
         EOF
 
+    - name: Generate Gradle Wrapper
+      run: |
+        echo "Generating Gradle Wrapper..."
+        cd android
+        
+        # ساختار فایل‌های گریدل
+        cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+        distributionBase=GRADLE_USER_HOME
+        distributionUrl=https\://services.gradle.org/distributions/gradle-7.5.1-bin.zip
+        zipStoreBase=GRADLE_USER_HOME
+        zipStorePath=wrapper/dists
+        EOF
+        
+        # ساخت فایل شل اسکریپ Gradle (gradlew)
+        cat > gradlew << 'EOF'
+        #!/bin/sh
+        # Fail fast if we're on Windows/Cygwin
+        case "`uname`" in
+            CYGWIN*|MINGW*|MSYS*|WIN*|Darwin*) true
+                exit 1 ;;
+        esac
+        
+        # Attempt to set APP_HOME
+        # Resolve dependencies:
+        # . (dot) command calls resolveAppHome
+        . "lib/resolveAppLocation.sh"
+        
+        # (dot) command calls loadEnv
+        . "lib/gradle-app-loader.sh"
+        
+        # Execute Gradle
+        exec "$JAVACMD" "$JAVA_HOME/bin/java" -classpath "$APP_HOME/lib/gradle-launcher-7.5.1.jar" org.gradle.wrapper.GradleWrapperMain "$@"
+        EOF
+        
+        chmod +x gradlew
+        # نسخه گریدل را به پوشه کپی می‌کنیم
+        cp gradlew android/
+
     - name: Build APK
       run: |
         echo "Starting build..."
-        chmod +x gradlew
+        cd android
         ./gradlew assembleRelease --no-daemon
     
     - name: Upload APK
