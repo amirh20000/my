@@ -23,17 +23,23 @@ jobs:
       with:
         node-version: '18'
 
-    - name: Create Android Project
+    - name: Install Dependencies
+      run: |
+        echo "Installing dependencies..."
+        npm install
+
+    - name: Create Minimal Android Project
       run: |
         echo "Creating minimal Android project..."
         
-        # ساخت پوشه اصلی
+        # ساخت تمام پوشه‌ها به صورت جداگانه (برای اطمینان)
         mkdir -p android/app/src/main/java/com/invoiceapp
-        mkdir -p android/app/src/main/res
+        mkdir -p android/app/src/main/res/values
+        mkdir -p android/app/src/main/res/layout
         mkdir -p android/app/src/main/assets
         mkdir -p android/gradle/wrapper
         
-        # فایل build.gradle ساده (سطح پروژه)
+        # فایل build.gradle (سطح پروژه)
         cat > android/build.gradle << 'EOF'
         buildscript {
             repositories {
@@ -53,18 +59,19 @@ jobs:
         }
         EOF
         
-        # فایل settings.gradle ساده
+        # فایل settings.gradle
         cat > android/settings.gradle << 'EOF'
-        rootProject.name = 'invoice-app'
+        rootProject.name = 'InvoiceApp'
+        include ':app'
         EOF
         
-        # فایل app/build.gradle ساده
+        # فایل app/build.gradle
         cat > android/app/build.gradle << 'EOF'
         apply plugin: "com.android.application"
         
         android {
+            namespace "com.invoiceapp"
             compileSdkVersion 33
-            buildToolsVersion "33.0.0"
             
             defaultConfig {
                 applicationId "com.invoiceapp.shop"
@@ -87,19 +94,21 @@ jobs:
         }
         EOF
         
-        # فایل AndroidManifest.xml ساده
+        # فایل AndroidManifest.xml
         cat > android/app/src/main/AndroidManifest.xml << 'EOF'
         <manifest xmlns:android="http://schemas.android.com/apk/res/android">
             <uses-permission android:name="android.permission.INTERNET" />
             
             <application
+                android:name=".MainApplication"
                 android:label="Invoice App"
                 android:icon="@mipmap/ic_launcher"
-                android:theme="@android:style/AppTheme.NoActionBar">
+                android:theme="@android:style/Theme.AppCompat.Light.NoActionBar">
                 <activity
                     android:name=".MainActivity"
                     android:label="Invoice App"
                     android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+                    android:launchMode="singleTask"
                     android:windowSoftInputMode="adjustResize"
                     android:exported="true">
                     <intent-filter>
@@ -111,7 +120,7 @@ jobs:
         </manifest>
         EOF
         
-        # MainActivity.java ساده
+        # فایل MainActivity.java
         cat > android/app/src/main/java/com/invoiceapp/MainActivity.java << 'EOF'
         package com.invoiceapp;
         
@@ -124,34 +133,21 @@ jobs:
             }
         }
         EOF
-        
-        # فایل strings.xml
-        cat > android/app/src/main/res/values/strings.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <resources>
-            <string name="app_name">Invoice App</string>
-        </resources>
-        EOF
 
     - name: Generate Gradle Wrapper
       run: |
         cd android
-        curl -Lo gradlew https://raw.githubusercontent.com/gradle/gradle/v8.5.1/scripts/gradlew
-        curl -Lo gradle-wrapper.properties https://raw.githubusercontent.com/gradle/gradle/v8.5.1/gradle/wrapper/gradle-wrapper.properties
-        curl -Lo gradle-wrapper.jar https://raw.githubusercontent.com/gradle/gradle/v8.5.1/gradle/wrapper/gradle-wrapper.jar
         
-        # دانلود wrapper در پوشه gradle/wrapper (ایمن شود ساختار استاندارد شود)
-        mkdir -p gradle/wrapper
-        cp gradlew gradle/wrapper/
-        cp gradle-wrapper.properties gradle/wrapper/
-        cp gradle-wrapper.jar gradle/wrapper/
+        # استفاده از ابزار gradle برای ساخت wrapper
+        gradle wrapper
         
+        # اطمینان از اینکه gradlew وجود دارد
         chmod +x gradlew
 
-    - name: Install Dependencies
+    - name: Install Dependencies (Ensure Node)
       run: |
-        echo "Installing dependencies..."
-        npm install
+        echo "Ensuring Node is available..."
+        # دستور npm install قبلی انجام شده است
 
     - name: Build APK
       run: |
@@ -161,6 +157,9 @@ jobs:
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
+      with:
+        name: invoice-app
+        path: android/app/build/outputs/apk/release/app-release.apk
       with:
         name: invoice-app
         path: android/app/build/outputs/apk/release/app-release.apk
