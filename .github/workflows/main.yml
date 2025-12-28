@@ -23,10 +23,158 @@ jobs:
       with:
         node-version: '18'
 
-    - name: Setup EAS CLI
-      run: npm install -g eas-cli
+    - name: Install Dependencies
+      run: |
+        echo "Installing dependencies..."
+        npm install
+        # نصب ابزارهای خط فرمان برای لینوکس (برای شبیه‌سازی محیط ویندوز)
+        sudo apt-get update
+        sudo apt-get install -y dos2unix
+        sudo npm install -g minimist
 
-    - name: Build APK with EAS
-      run: eas build --platform android --profile preview --non-interactive
-      env:
-        EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    - name: Download Gradle Wrapper
+      run: |
+        echo "Downloading Gradle Wrapper..."
+        wget https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.properties -O gradle-wrapper.properties
+        wget https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar -O gradle-wrapper.jar
+
+    - name: Create Android Project Structure
+      run: |
+        echo "Creating structure..."
+        
+        # ساخت پوشه اصلی
+        mkdir -p android/app/src/main/java/com/invoiceapp
+        mkdir -p android/app/src/main/res/values
+        
+        # فایل build.gradle (سطح پروژه)
+        cat > android/build.gradle << 'EOF'
+        buildscript {
+            ext {
+                buildToolsVersion = "33.0.0"
+                minSdkVersion = 21
+                compileSdkVersion = 33
+                targetSdkVersion = 33
+            }
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath("com.android.tools.build:gradle:7.3.1")
+                classpath("com.facebook.react:react-native-gradle-plugin")
+            }
+        }
+        
+        allprojects {
+            repositories {
+                google()
+                mavenCentral()
+                maven { url "https://www.jitpack.io" }
+            }
+        }
+        EOF
+        
+        # فایل settings.gradle
+        cat > android/settings.gradle << 'EOF'
+        rootProject.name = 'InvoiceApp'
+        apply from: file("../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
+        applyNativeModulesSettingsGradle(settings)
+        include ':app'
+        EOF
+        
+        # فایل app/build.gradle
+        cat > android/app/build.gradle << 'EOF'
+        apply plugin: "com.android.application"
+        apply plugin: "com.facebook.react"
+        
+        project.ext.react = [
+            enableHermes: true
+        ]
+        
+        android {
+            namespace "com.invoiceapp"
+            compileSdkVersion rootProject.ext.compileSdkVersion
+            
+            defaultConfig {
+                applicationId "com.invoiceapp"
+                minSdkVersion rootProject.ext.minSdkVersion
+                targetSdkVersion rootProject.ext.targetSdkVersion
+                versionCode 1
+                versionName "1.0"
+            }
+            
+            signingConfigs {
+                release {
+                    storeFile file('debug.keystore')
+                    storePassword 'android'
+                    keyAlias 'androiddebugkey'
+                    keyPassword 'android'
+                }
+            }
+            
+            buildTypes {
+                release {
+                    signingConfig signingConfigs.release
+                }
+            }
+        }
+        
+        dependencies {
+            implementation("com.facebook.react:react-android")
+        }
+        
+        apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
+        applyNativeModulesAppBuildGradle(project)
+        EOF
+        
+        # فایل AndroidManifest.xml
+        cat > android/app/src/main/AndroidManifest.xml << 'EOF'
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET" />
+            
+            <application
+              android:name=".MainApplication"
+              android:label="Invoice App"
+              android:allowBackup="false"
+              android:theme="@style/AppTheme">
+              <activity
+                android:name=".MainActivity"
+                android:label="Invoice App"
+                android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+                android:launchMode="singleTask"
+                android:windowSoftInputMode="adjustResize"
+                android:exported="true">
+                <intent-filter>
+                    <action android:name="android.intent.action.MAIN" />
+                    <category android:name="android.intent.category.LAUNCHER" />
+                </intent-filter>
+              </activity>
+            </application>
+        </manifest>
+        EOF
+        
+        # MainActivity.java
+        cat > android/app/src/main/java/com/invoiceapp/MainActivity.java << 'EOF'
+        package com.invoiceapp;
+        
+        import com.facebook.react.ReactActivity;
+        
+        public class MainActivity extends ReactActivity {
+            @Override
+            protected String getMainComponentName() {
+                return "InvoiceApp";
+            }
+        }
+        EOF
+
+    - name: Build APK
+      run: |
+        echo "Starting build..."
+        chmod +x gradlew
+        ./gradlew assembleRelease --no-daemon
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: invoice-app
+        path: android/app/build/outputs/apk/release/app-release.apk
