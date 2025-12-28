@@ -1,0 +1,49 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Create Android project if missing
+      run: |
+        if [ ! -d "android" ]; then
+          echo "Creating Android project..."
+          npx react-native init TempProject --version 0.72.6 --skip-install
+          cp -r TempProject/android .
+          rm -rf TempProject
+        fi
+    
+    - name: Install dependencies
+      run: npm install
+    
+    - name: Build APK
+      run: |
+        cd android
+        chmod +x gradlew
+        ./gradlew assembleRelease
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v3
+      with:
+        name: app-release
+        path: android/app/build/outputs/apk/release/app-release.apk
